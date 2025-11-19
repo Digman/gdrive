@@ -15,6 +15,47 @@ import (
 	"google.golang.org/api/drive/v3"
 )
 
+// credentialsFile 憑據文件結構
+type credentialsFile struct {
+	Installed *struct {
+		ClientID     string   `json:"client_id"`
+		ClientSecret string   `json:"client_secret"`
+		AuthURI      string   `json:"auth_uri"`
+		TokenURI     string   `json:"token_uri"`
+		RedirectURIs []string `json:"redirect_uris"`
+	} `json:"installed"`
+}
+
+// showCredentialsSetupGuide 顯示憑據設置指南並打開瀏覽器
+func showCredentialsSetupGuide(credentialsPath string) {
+	fmt.Println()
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println("  ⚠️  未找到或無法解析憑據文件")
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println()
+	fmt.Printf("  預期路徑: %s\n", credentialsPath)
+	fmt.Println()
+	fmt.Println("  📝 請按照以下步驟獲取憑據文件：")
+	fmt.Println()
+	fmt.Println("  1. 訪問 Google Cloud Console（瀏覽器將自動打開）")
+	fmt.Println("  2. 創建或選擇項目")
+	fmt.Println("  3. 啟用 Google Drive API")
+	fmt.Println("  4. 創建 OAuth2 憑據（類型：電視和受限輸入設備）")
+	fmt.Println("  5. 下載憑據文件並保存為上述路徑")
+	fmt.Println()
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println()
+
+	// 打開 Google Cloud Console
+	consoleURL := "https://console.cloud.google.com/apis/credentials"
+	if err := openBrowser(consoleURL); err != nil {
+		fmt.Printf("  提示：無法自動打開瀏覽器，請手動訪問：\n  %s\n\n", consoleURL)
+	} else {
+		fmt.Println("  ✓ 已在瀏覽器中打開 Google Cloud Console")
+		fmt.Println()
+	}
+}
+
 // getOAuth2Client 獲取已認證的 OAuth2 HTTP 客戶端
 func getOAuth2Client(config *Config) (*http.Client, error) {
 	ctx := context.Background()
@@ -22,13 +63,30 @@ func getOAuth2Client(config *Config) (*http.Client, error) {
 	// 讀取憑據文件
 	credentialsData, err := os.ReadFile(config.CredentialsFile)
 	if err != nil {
+		showCredentialsSetupGuide(config.CredentialsFile)
 		return nil, fmt.Errorf("無法讀取憑據文件: %w", err)
 	}
 
-	// 解析 OAuth2 配置
-	oauthConfig, err := google.ConfigFromJSON(credentialsData, drive.DriveFileScope)
-	if err != nil {
+	// 解析憑據文件
+	var creds credentialsFile
+	if err := json.Unmarshal(credentialsData, &creds); err != nil {
+		showCredentialsSetupGuide(config.CredentialsFile)
 		return nil, fmt.Errorf("無法解析憑據文件: %w", err)
+	}
+
+	if creds.Installed == nil {
+		showCredentialsSetupGuide(config.CredentialsFile)
+		return nil, fmt.Errorf("憑據文件格式錯誤：請使用「電視和受限輸入設備」或「已安裝應用」類型的 OAuth2 客戶端")
+	}
+
+	// 手動構建 OAuth2 配置（Device Flow）
+	// 注意：Device Flow 不支持某些敏感權限範圍
+	// 使用 drive.file 範圍，允許訪問應用創建和打開的文件
+	oauthConfig := &oauth2.Config{
+		ClientID:     creds.Installed.ClientID,
+		ClientSecret: creds.Installed.ClientSecret,
+		Endpoint:     google.Endpoint,
+		Scopes:       []string{drive.DriveFileScope},
 	}
 
 	// 嘗試從文件加載 Token
@@ -59,17 +117,20 @@ func getTokenFromDeviceFlow(ctx context.Context, oauthConfig *oauth2.Config) (*o
 	}
 
 	// 顯示用戶授權信息
-	fmt.Println("========================================")
-	fmt.Println("請完成以下步驟進行Google Drive授權：")
-	fmt.Println("1. 系統將自動打開瀏覽器")
-	fmt.Printf("2. 如果瀏覽器未自動打開，請手動訪問：%s\n", deviceAuthResp.VerificationURI)
-	fmt.Printf("3. 輸入以下代碼：%s\n", deviceAuthResp.UserCode)
-	fmt.Println("4. 授權完成後，程序將自動繼續...")
-	fmt.Println("========================================")
+	fmt.Println()
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println("  🔐 Google Drive 設備授權")
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println()
+	fmt.Println("  1. 瀏覽器將自動打開授權頁面")
+	fmt.Printf("  2. 網址：%s\n", deviceAuthResp.VerificationURI)
+	fmt.Printf("  3. 輸入授權碼：\033[1;36m%s\033[0m\n", deviceAuthResp.UserCode)
+	fmt.Println()
+	fmt.Println("  ⏳ 等待授權...")
 
 	// 嘗試打開瀏覽器
 	if err := openBrowser(deviceAuthResp.VerificationURI); err != nil {
-		fmt.Printf("警告：無法自動打開瀏覽器: %v\n", err)
+		fmt.Printf("  ⚠️  無法自動打開瀏覽器，請手動訪問上方網址\n\n")
 	}
 
 	// 輪詢等待用戶授權
@@ -78,7 +139,7 @@ func getTokenFromDeviceFlow(ctx context.Context, oauthConfig *oauth2.Config) (*o
 		return nil, fmt.Errorf("等待授權超時或失敗: %w", err)
 	}
 
-	fmt.Println("✅ 授權成功！")
+	fmt.Println("  ✅ 授權成功！")
 	return token, nil
 }
 
@@ -88,12 +149,17 @@ func saveToken(path string, token *oauth2.Token) error {
 	if err != nil {
 		return fmt.Errorf("無法創建 Token 文件: %w", err)
 	}
-	defer file.Close()
 
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(token); err != nil {
+		_ = file.Close() // 忽略關閉錯誤，因為寫入已失敗
 		return fmt.Errorf("無法寫入 Token: %w", err)
+	}
+
+	// 明確檢查 Close 錯誤
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("無法關閉 Token 文件: %w", err)
 	}
 
 	return nil
@@ -105,7 +171,7 @@ func loadToken(path string) (*oauth2.Token, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer file.Close() // 讀取操作可以忽略 Close 錯誤
 
 	token := &oauth2.Token{}
 	if err := json.NewDecoder(file).Decode(token); err != nil {
@@ -114,7 +180,7 @@ func loadToken(path string) (*oauth2.Token, error) {
 
 	// 檢查 Token 是否過期
 	if token.Expiry.Before(time.Now()) && token.RefreshToken == "" {
-		return nil, fmt.Errorf("Token 已過期且無法刷新")
+		return nil, fmt.Errorf("token 已過期且無法刷新")
 	}
 
 	return token, nil
