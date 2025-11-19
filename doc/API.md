@@ -9,6 +9,7 @@
 - ✅ 使用 Device Flow 授權模式（適用於"電視和受限輸入設備"類型項目）
 - ✅ 支持文件上傳、更新和智能上傳或更新
 - ✅ 支持創建文件夾
+- ✅ 支持定時備份（異步、可配置間隔、支持全量/增量模式）
 - ✅ Token 自動刷新機制
 - ✅ 系統瀏覽器自動引導授權
 - ✅ 純 Go 實現，無外部依賴
@@ -25,8 +26,29 @@ type Config struct {
     FolderName      string // 文件夾名稱
     CredentialsFile string // 憑據文件路徑
     TokenFile       string // Token 文件路徑
+
+    // 定時備份配置
+    BackupEnabled  bool          // 是否啟用定時備份
+    BackupInterval time.Duration // 備份間隔（如 30*time.Minute, time.Hour）
+    BackupPaths    []string      // 要備份的文件/目錄路徑列表
+    BackupExcludes []string      // 排除的文件模式（支持通配符，如 "*.tmp"）
+    BackupFullMode bool          // true=全量備份，false=僅備份修改的文件
+    Logger         Logger        // 日志實例（可選，nil 則使用默認實現）
 }
 ```
+
+**備份配置字段說明：**
+
+- `BackupEnabled`: 是否啟用定時備份功能
+- `BackupInterval`: 備份執行間隔，使用 `time.Duration` 類型（如 `30*time.Minute`, `time.Hour`）
+- `BackupPaths`: 需要備份的文件或目錄路徑列表（支持混合配置）
+- `BackupExcludes`: 要排除的文件模式，支持通配符（如 `*.tmp`, `*.cache`）
+- `BackupFullMode`:
+  - `true`: 全量備份模式，每次備份所有文件
+  - `false`: 增量備份模式，僅備份修改過的文件（基於文件修改時間）
+- `Logger`: 日志實例，用於控制備份過程的日志輸出
+  - `nil`: 使用默認實現（輸出到標準輸出）
+  - 自定義實現：可集成到任何日志系統（logrus, zap 等）
 
 #### 方法
 
@@ -36,6 +58,128 @@ type Config struct {
 
 **返回值：**
 - `error`: 如果配置無效則返回錯誤信息
+
+---
+
+## 日志接口
+
+### Logger
+
+備份日志接口，允許用戶集成自定義日志系統。
+
+#### 接口定義
+
+```go
+type Logger interface {
+    // Infof 信息級別日志
+    Infof(format string, v ...interface{})
+
+    // Warningf 警告級別日志
+    Warningf(format string, v ...interface{})
+
+    // Errorf 錯誤級別日志
+    Errorf(format string, v ...interface{})
+}
+```
+
+#### 使用場景
+
+**默認行為（不提供 Logger）：**
+```go
+config := &gdrive.Config{
+    BackupEnabled: true,
+    // ... 其他配置 ...
+    // Logger 未設置，使用默認實現（輸出到標準輸出）
+}
+```
+
+**集成標準庫 log：**
+```go
+type StdLogger struct {
+    logger *log.Logger
+}
+
+func (l *StdLogger) Infof(format string, v ...interface{}) {
+    l.logger.Printf("[INFO] " + format, v...)
+}
+
+func (l *StdLogger) Warningf(format string, v ...interface{}) {
+    l.logger.Printf("[WARN] " + format, v...)
+}
+
+func (l *StdLogger) Errorf(format string, v ...interface{}) {
+    l.logger.Printf("[ERROR] " + format, v...)
+}
+
+config := &gdrive.Config{
+    BackupEnabled: true,
+    Logger: &StdLogger{logger: log.New(os.Stdout, "", log.LstdFlags)},
+}
+```
+
+**集成 logrus：**
+```go
+type LogrusAdapter struct {
+    logger *logrus.Logger
+}
+
+func (l *LogrusAdapter) Infof(format string, v ...interface{}) {
+    l.logger.Infof(format, v...)
+}
+
+func (l *LogrusAdapter) Warningf(format string, v ...interface{}) {
+    l.logger.Warnf(format, v...)
+}
+
+func (l *LogrusAdapter) Errorf(format string, v ...interface{}) {
+    l.logger.Errorf(format, v...)
+}
+
+config := &gdrive.Config{
+    BackupEnabled: true,
+    Logger: &LogrusAdapter{logger: logrus.New()},
+}
+```
+
+**集成 zap：**
+```go
+type ZapAdapter struct {
+    logger *zap.SugaredLogger
+}
+
+func (l *ZapAdapter) Infof(format string, v ...interface{}) {
+    l.logger.Infof(format, v...)
+}
+
+func (l *ZapAdapter) Warningf(format string, v ...interface{}) {
+    l.logger.Warnf(format, v...)
+}
+
+func (l *ZapAdapter) Errorf(format string, v ...interface{}) {
+    l.logger.Errorf(format, v...)
+}
+
+config := &gdrive.Config{
+    BackupEnabled: true,
+    Logger: &ZapAdapter{logger: zap.S()},
+}
+```
+
+#### 日志級別說明
+
+- **Info**: 正常操作、成功信息
+  - 定時備份已啟動
+  - 備份任務開始/完成
+  - 文件已創建/已更新
+
+- **Warn**: 非致命錯誤、警告信息
+  - 訪問文件失敗
+  - 訪問路徑失敗
+  - 掃描目錄失敗
+
+- **Error**: 關鍵錯誤、失敗信息
+  - 掃描文件失敗
+  - 備份失敗
 
 ---
 
@@ -210,6 +354,111 @@ subFolderID, err := client.CreateFolder("子文件夾", folderID)
 - 使用配置中的 `FolderName`
 - 如果文件夾已存在則返回現有 ID
 - 如果不存在則自動創建
+
+---
+
+## 定時備份操作
+
+### StartBackup
+
+##### StartBackup() error
+
+啟動定時備份（異步執行，非阻塞）。
+
+**返回值：**
+- `error`: 錯誤信息
+
+**前置條件：**
+- 配置中 `BackupEnabled` 必須為 `true`
+- `BackupInterval` 必須大於 0
+- `BackupPaths` 不能為空
+
+**注意事項：**
+- 異步執行，不會阻塞主程序
+- 啟動時會立即執行一次備份
+- 後續按照 `BackupInterval` 間隔自動執行
+- 單個文件失敗不影響其他文件的備份
+- 重複調用會返回錯誤
+
+**示例：**
+```go
+config := &gdrive.Config{
+    Enabled:         true,
+    FolderName:      "我的備份",
+    CredentialsFile: "credentials.json",
+    TokenFile:       "token.json",
+
+    // 定時備份配置
+    BackupEnabled:  true,
+    BackupInterval: 30 * time.Minute,
+    BackupPaths:    []string{"./data", "./logs"},
+    BackupExcludes: []string{"*.tmp", "*.cache"},
+    BackupFullMode: false, // 增量備份
+}
+
+client, err := gdrive.NewClient(config)
+if err != nil {
+    log.Fatalf("創建客戶端失敗: %v", err)
+}
+
+// 啟動定時備份
+if err := client.StartBackup(); err != nil {
+    log.Fatalf("啟動備份失敗: %v", err)
+}
+
+// 程序繼續運行，備份在後台自動執行
+```
+
+---
+
+### StopBackup
+
+##### StopBackup()
+
+停止定時備份。
+
+**注意事項：**
+- 安全停止備份調度器
+- 如果備份未啟動，調用此方法無任何效果
+- 建議在程序退出前調用以確保資源正確釋放
+
+**示例：**
+```go
+// 程序退出前停止備份
+defer client.StopBackup()
+
+// 或者在需要時手動停止
+client.StopBackup()
+```
+
+---
+
+### 備份行為說明
+
+**全量備份模式** (`BackupFullMode = true`)：
+- 每次備份所有配置的文件和目錄
+- 適用於文件數量較少或需要確保完整備份的場景
+
+**增量備份模式** (`BackupFullMode = false`)：
+- 僅備份修改過的文件（基於文件修改時間）
+- 首次備份會備份所有文件
+- 後續備份僅上傳自上次備份後修改的文件
+- 適用於文件數量較多的場景，節省帶寬和時間
+
+**文件掃描：**
+- 支持指定單個文件：`BackupPaths: []string{"./config.json"}`
+- 支持指定目錄：`BackupPaths: []string{"./data"}`（會遞歸掃描所有文件）
+- 支持混合配置：`BackupPaths: []string{"./config.json", "./data", "./logs"}`
+
+**排除規則：**
+- 使用通配符模式（如 `*.tmp`, `*.cache`）
+- 僅匹配文件名，不匹配路徑
+- 多個排除規則會依次檢查
+
+**錯誤處理：**
+- 單個文件備份失敗不會中斷整個備份任務
+- 失敗的文件會輸出錯誤信息但不會拋出異常
+- 備份任務會繼續處理剩餘文件
 
 ---
 

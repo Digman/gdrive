@@ -11,10 +11,12 @@
 - 📤 **文件上傳** - 支持上傳文件到應用管理的文件夾
 - 🔄 **文件更新** - 按文件名稱更新覆蓋已存在的文件
 - 🤖 **智能操作** - 自動判斷文件是否存在，不存在則創建，存在則更新
+- ⏰ **定時備份** - 支持異步定時備份，可配置間隔、路徑、排除規則和全量/增量模式
 - 📁 **文件夾管理** - 支持創建和管理應用專屬的文件夾
 - 🔑 **Token 自動刷新** - 自動處理 Token 過期和刷新
 - 🌐 **瀏覽器引導** - 自動打開系統瀏覽器進行授權
 - 🔒 **安全隔離** - 僅訪問應用創建的文件，不影響用戶其他文件
+- 📝 **日志集成** - 支持自定義日志系統集成，靈活控制備份日志輸出
 - ⚡ **零依賴** - 純 Go 實現，無外部系統依賴
 
 ## 📦 安裝
@@ -128,6 +130,14 @@ type Config struct {
     FolderName      string // 文件夾名稱
     CredentialsFile string // 憑據文件路徑
     TokenFile       string // Token 文件路徑
+
+    // 定時備份配置
+    BackupEnabled  bool          // 是否啟用定時備份
+    BackupInterval time.Duration // 備份間隔（如 30*time.Minute, time.Hour）
+    BackupPaths    []string      // 要備份的文件/目錄路徑列表
+    BackupExcludes []string      // 排除的文件模式（支持通配符，如 "*.tmp"）
+    BackupFullMode bool          // true=全量備份，false=僅備份修改的文件
+    Logger         Logger        // 日志實例（可選，nil 則使用默認實現）
 }
 ```
 
@@ -161,6 +171,18 @@ fileID, isNew, err := client.UploadOrUpdateFile("localfile.txt")
 
 ```go
 folderID, err := client.CreateFolder("文件夾名稱", "父文件夾ID")
+```
+
+#### 啟動定時備份
+
+```go
+err := client.StartBackup()  // 異步啟動，非阻塞
+```
+
+#### 停止定時備份
+
+```go
+client.StopBackup()
 ```
 
 詳細 API 文檔請參閱 [doc/API.md](doc/API.md)
@@ -199,6 +221,100 @@ mainFolderID, _ := client.CreateFolder("備份", "")
 subFolderID, _ := client.CreateFolder("2024", mainFolderID)
 ```
 
+### 示例 3: 定時備份
+
+```go
+package main
+
+import (
+    "log"
+    "time"
+    "github.com/Digman/gdrive"
+)
+
+func main() {
+    // 配置定時備份
+    config := &gdrive.Config{
+        Enabled:         true,
+        FolderName:      "我的備份",
+        CredentialsFile: "credentials.json",
+        TokenFile:       "token.json",
+
+        // 定時備份配置
+        BackupEnabled:  true,
+        BackupInterval: 30 * time.Minute,              // 每 30 分鐘備份一次
+        BackupPaths:    []string{"./data", "./logs"},  // 備份這兩個目錄
+        BackupExcludes: []string{"*.tmp", "*.log"},    // 排除臨時文件和日志
+        BackupFullMode: false,                         // 僅備份修改的文件
+    }
+
+    // 創建客戶端
+    client, err := gdrive.NewClient(config)
+    if err != nil {
+        log.Fatalf("創建客戶端失敗: %v", err)
+    }
+
+    // 啟動定時備份
+    if err := client.StartBackup(); err != nil {
+        log.Fatalf("啟動備份失敗: %v", err)
+    }
+
+    // 程序繼續運行，備份會在後台自動執行
+    select {} // 保持程序運行
+
+    // 或者在程序退出前停止備份
+    // defer client.StopBackup()
+}
+```
+
+### 示例 4: 集成自定義日志系統
+
+```go
+package main
+
+import (
+    "log"
+    "time"
+    "github.com/Digman/gdrive"
+)
+
+// MyLogger 自定義日志實現
+type MyLogger struct{}
+
+func (l *MyLogger) Infof(format string, v ...interface{}) {
+    log.Printf("[INFO] "+format, v...)
+}
+
+func (l *MyLogger) Warningf(format string, v ...interface{}) {
+    log.Printf("[WARN] "+format, v...)
+}
+
+func (l *MyLogger) Errorf(format string, v ...interface{}) {
+    log.Printf("[ERROR] "+format, v...)
+}
+
+func main() {
+    // 配置並注入自定義日志
+    config := &gdrive.Config{
+        Enabled:         true,
+        FolderName:      "我的備份",
+        CredentialsFile: "credentials.json",
+        TokenFile:       "token.json",
+
+        BackupEnabled:  true,
+        BackupInterval: 30 * time.Minute,
+        BackupPaths:    []string{"./data"},
+        Logger:         &MyLogger{}, // 使用自定義日志
+    }
+
+    client, _ := gdrive.NewClient(config)
+    client.StartBackup()
+
+    // 備份日志將通過 MyLogger 輸出，可以集成到您的日志系統
+    select {}
+}
+```
+
 ## 🛠️ 項目結構
 
 ```
@@ -210,6 +326,8 @@ gdrive/
 ├── client.go          # 客戶端封裝
 ├── file.go            # 文件操作
 ├── folder.go          # 文件夾操作
+├── backup.go          # 定時備份調度器
+├── logger.go          # 日志接口定義
 ├── examples/          # 使用示例
 │   └── main.go
 └── doc/               # 文檔

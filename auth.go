@@ -127,6 +127,7 @@ func getTokenFromDeviceFlow(ctx context.Context, oauthConfig *oauth2.Config) (*o
 	fmt.Printf("  3. 輸入授權碼：\033[1;36m%s\033[0m\n", deviceAuthResp.UserCode)
 	fmt.Println()
 	fmt.Println("  ⏳ 等待授權...")
+	fmt.Println()
 
 	// 嘗試打開瀏覽器
 	if err := openBrowser(deviceAuthResp.VerificationURI); err != nil {
@@ -139,7 +140,8 @@ func getTokenFromDeviceFlow(ctx context.Context, oauthConfig *oauth2.Config) (*o
 		return nil, fmt.Errorf("等待授權超時或失敗: %w", err)
 	}
 
-	fmt.Println("  ✅ 授權成功！")
+	fmt.Println("  ✅ Google Drive 設備授權授權成功！")
+	fmt.Println()
 	return token, nil
 }
 
