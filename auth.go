@@ -60,7 +60,7 @@ func getTokenFromDeviceFlow(ctx context.Context, oauthConfig *oauth2.Config) (*o
 
 	// 顯示用戶授權信息
 	fmt.Println("========================================")
-	fmt.Println("請完成以下步驟進行授權：")
+	fmt.Println("請完成以下步驟進行Google Drive授權：")
 	fmt.Println("1. 系統將自動打開瀏覽器")
 	fmt.Printf("2. 如果瀏覽器未自動打開，請手動訪問：%s\n", deviceAuthResp.VerificationURI)
 	fmt.Printf("3. 輸入以下代碼：%s\n", deviceAuthResp.UserCode)
