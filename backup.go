@@ -52,29 +52,29 @@ func (s *BackupScheduler) Start() {
 		}
 	}()
 
-	s.logger.Infof("[Backup] 定時備份已啟動，間隔: %v", s.config.BackupInterval)
+	s.logger.Infof("✅ 定時備份已啟動，間隔: %v", s.config.BackupInterval)
 }
 
 // Stop 停止調度器
 func (s *BackupScheduler) Stop() {
 	if s.stopChan != nil {
 		close(s.stopChan)
-		s.logger.Infof("[Backup] 定時備份已停止")
+		s.logger.Infof("✅ 定時備份已停止")
 	}
 }
 
 // runBackup 執行一次備份任務
 func (s *BackupScheduler) runBackup() {
-	s.logger.Infof("[Backup] 開始備份任務...")
+	s.logger.Infof("🔄 開始備份任務...")
 
 	files, err := s.scanFiles()
 	if err != nil {
-		s.logger.Errorf("[Backup] 掃描文件失敗: %v", err)
+		s.logger.Errorf("❌ 掃描文件失敗: %v", err)
 		return
 	}
 
 	if len(files) == 0 {
-		s.logger.Infof("[Backup] 沒有文件需要備份")
+		s.logger.Infof("ℹ️  沒有文件需要備份")
 		return
 	}
 
@@ -84,7 +84,7 @@ func (s *BackupScheduler) runBackup() {
 	for _, file := range files {
 		fileInfo, err := os.Stat(file)
 		if err != nil {
-			s.logger.Warningf("[Backup] 訪問文件失敗 %s: %v", file, err)
+			s.logger.Warningf("⚠️  訪問文件失敗 %s: %v", file, err)
 			failCount++
 			continue // 單個文件失敗不影響其他
 		}
@@ -97,7 +97,7 @@ func (s *BackupScheduler) runBackup() {
 		// 執行上傳
 		_, isNew, err := s.client.UploadOrUpdateFile(file)
 		if err != nil {
-			s.logger.Errorf("[Backup] 備份失敗 %s: %v", file, err)
+			s.logger.Errorf("❌ 備份失敗 %s: %v", file, err)
 			failCount++
 			continue // 單個文件失敗不影響其他
 		}
@@ -107,13 +107,13 @@ func (s *BackupScheduler) runBackup() {
 		successCount++
 
 		if isNew {
-			s.logger.Infof("[Backup] 已創建: %s", file)
+			s.logger.Infof("✅ 已創建: %s", file)
 		} else {
-			s.logger.Infof("[Backup] 已更新: %s", file)
+			s.logger.Infof("✅ 已更新: %s", file)
 		}
 	}
 
-	s.logger.Infof("[Backup] 備份完成 - 成功: %d, 失敗: %d", successCount, failCount)
+	s.logger.Infof("📊 備份完成 - 成功: %d, 失敗: %d", successCount, failCount)
 }
 
 // scanFiles 掃描需要備份的文件列表
@@ -123,7 +123,7 @@ func (s *BackupScheduler) scanFiles() ([]string, error) {
 	for _, path := range s.config.BackupPaths {
 		fileInfo, err := os.Stat(path)
 		if err != nil {
-			s.logger.Warningf("[Backup] 訪問路徑失敗 %s: %v", path, err)
+			s.logger.Warningf("⚠️  訪問路徑失敗 %s: %v", path, err)
 			continue // 單個路徑失敗不影響其他
 		}
 
@@ -148,7 +148,7 @@ func (s *BackupScheduler) scanFiles() ([]string, error) {
 				return nil
 			})
 			if err != nil {
-				s.logger.Warningf("[Backup] 掃描目錄失敗 %s: %v", path, err)
+				s.logger.Warningf("⚠️  掃描目錄失敗 %s: %v", path, err)
 			}
 		} else {
 			// 是文件：直接添加
