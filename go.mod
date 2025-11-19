@@ -1,4 +1,4 @@
-module github.com/longjinhua/gdrive
+module github.com/Digman/gdrive
 
 go 1.25.3
 

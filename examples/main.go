@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/longjinhua/gdrive"
+	"github.com/Digman/gdrive"
 )
 
 func main() {
